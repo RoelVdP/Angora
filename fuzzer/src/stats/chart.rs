@@ -35,6 +35,7 @@ impl ChartStats {
     pub fn sync_from_local(&mut self, local: &mut LocalStats) {
         self.track_time += local.track_time;
         self.num_rounds.count();
+
         local.avg_edge_num.sync(&mut self.avg_edge_num);
         local.avg_exec_time.sync(&mut self.avg_exec_time);
 
@@ -51,6 +52,8 @@ impl ChartStats {
         self.num_hangs += local.num_hangs;
         st.num_crashes += local.num_crashes;
         self.num_crashes += local.num_crashes;
+
+        //local.clear();
     }
 
     pub fn sync_from_global(&mut self, depot: &Arc<Depot>, gb: &Arc<GlobalBranches>) {
@@ -91,14 +94,14 @@ impl ChartStats {
     fn get_speed(&mut self) {
         let t: TimeDuration = self.init_time.into();
         let d: time::Duration = t.into();
-        let ts = d.as_secs() as f32;
+        let ts = d.as_secs() as f64;
         let speed = if ts > 0.0 {
             let v: usize = self.num_exec.into();
-            v as f32 / ts
+            v as f64 / ts
         } else {
             0.0
         };
-        self.speed = Average::new(speed, 0);
+        self.speed = Average::new(speed as f32, 0);
     }
 
     pub fn mini_log(&self) -> String {
@@ -111,12 +114,19 @@ impl ChartStats {
             self.num_crashes.0
         )
     }
+
+    pub fn get_explore_num(&self) -> usize {
+        self.fuzz
+            .get(fuzz_type::FuzzType::ExploreFuzz.index())
+            .num_conds
+            .into()
+    }
 }
 
 impl fmt::Display for ChartStats {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.density.0 > 10.0 {
-            warn!("Density is too large (> 10%). Please increase `MAP_SIZE_POW2` in `llvm_mode/config.h` and `MAP_LENGTH` in `common/src/config.rs`. Or disable function-call context by compiling with `ANGORA_DISABLE_CONTEXT=1` or `ANGORA_DIRECT_FN_CONTEXT=1` environment variable.");
+            warn!("Density is too large (> 10%). Please increase `MAP_SIZE_POW2` in and `common/src/config.rs`. Or disable function-call context(density > 50%) by compiling with `ANGORA_CUSTOM_FN_CONTEXT=k` (k is an integer and 0 <= k <= 32) environment variable. Angora disables context if k is 0.");
         }
 
         if self.search.multiple_inconsist() {
@@ -133,7 +143,7 @@ impl fmt::Display for ChartStats {
             r#"
 {}
 {}
-    TIMING |     ALL: {},     TRACK: {}
+    TIMING |     RUN: {},   TRACK: {}
   COVERAGE |    EDGE: {},   DENSITY: {}%
     EXECS  |   TOTAL: {},     ROUND: {},     MAX_R: {}
     SPEED  |  PERIOD: {:6}r/s    TIME: {}us, 

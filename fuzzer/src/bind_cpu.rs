@@ -1,5 +1,7 @@
+use angora_common::defs;
 use libc;
 use num_cpus;
+use std::env;
 use std::{fs::File, io::prelude::*, mem, path::Path};
 
 #[cfg(target_os = "linux")]
@@ -44,8 +46,12 @@ pub fn find_free_cpus(_ask_num: usize) -> Vec<usize> {
 
 #[cfg(target_os = "linux")]
 pub fn find_free_cpus(ask_num: usize) -> Vec<usize> {
-    let proc_dir = Path::new("/proc");
     let mut free_cpus = vec![];
+    if env::var(defs::DISABLE_CPU_BINDING_VAR).is_ok() {
+        return free_cpus;
+    }
+
+    let proc_dir = Path::new("/proc");
     let max_num = num_cpus::get();
     let mut cpu_used = vec![false; max_num];
     info!("Found {} cores.", max_num);
@@ -58,7 +64,9 @@ pub fn find_free_cpus(ask_num: usize) -> Vec<usize> {
                 if let Ok(_) = name.parse::<u32>() {
                     let path = entry.path();
                     if let Some(cpuid) = get_info_from_status(&path.join("status")) {
-                        cpu_used[cpuid] = true;
+                        if cpuid < max_num {
+                            cpu_used[cpuid] = true;
+                        }
                     }
                 }
             }
@@ -86,9 +94,8 @@ pub fn bind_thread_to_cpu_core(_cid: usize) {
 
 #[cfg(target_os = "linux")]
 pub fn bind_thread_to_cpu_core(cid: usize) {
-    // let tid = unsafe { libc::pthread_self() };
     unsafe {
-        let mut c: libc::cpu_set_t = mem::uninitialized();
+        let mut c: libc::cpu_set_t = mem::zeroed();
         libc::CPU_ZERO(&mut c);
         libc::CPU_SET(cid, &mut c);
         if libc::sched_setaffinity(0, mem::size_of_val(&c), &c as *const libc::cpu_set_t) != 0 {

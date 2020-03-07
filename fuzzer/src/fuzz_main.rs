@@ -1,5 +1,6 @@
 use crate::stats::*;
 use angora_common::defs;
+use chrono::prelude::Local;
 use std::{
     collections::HashMap,
     fs,
@@ -18,6 +19,7 @@ use libc;
 use pretty_env_logger;
 
 pub fn fuzz_main(
+    mode: &str,
     in_dir: &str,
     out_dir: &str,
     track_target: &str,
@@ -31,18 +33,10 @@ pub fn fuzz_main(
     enable_exploitation: bool,
 ) {
     pretty_env_logger::init();
-    check_dep::check_dep(in_dir, out_dir, &pargs[0], track_target);
 
-    let running = Arc::new(AtomicBool::new(true));
-    set_sigint_handler(running.clone());
-
-    let angora_out_dir = initialize_directories(in_dir, out_dir, sync_afl);
-    let depot = Arc::new(depot::Depot::new(in_dir, &angora_out_dir));
-    info!("depot: {:?}", depot.dirs);
-    let stats = Arc::new(RwLock::new(stats::ChartStats::new()));
-    let global_branches = Arc::new(branches::GlobalBranches::new());
-
+    let (seeds_dir, angora_out_dir) = initialize_directories(in_dir, out_dir, sync_afl);
     let command_option = command::CommandOpt::new(
+        mode,
         track_target,
         pargs,
         &angora_out_dir,
@@ -52,9 +46,18 @@ pub fn fuzz_main(
         enable_afl,
         enable_exploitation,
     );
-
     info!("{:?}", command_option);
+
+    check_dep::check_dep(in_dir, out_dir, &command_option);
+
+    let depot = Arc::new(depot::Depot::new(seeds_dir, &angora_out_dir));
+    info!("{:?}", depot.dirs);
+
+    let stats = Arc::new(RwLock::new(stats::ChartStats::new()));
+    let global_branches = Arc::new(branches::GlobalBranches::new());
     let fuzzer_stats = create_stats_file_and_write_pid(&angora_out_dir);
+    let running = Arc::new(AtomicBool::new(true));
+    set_sigint_handler(running.clone());
 
     let mut executor = executor::Executor::new(
         command_option.specify(0),
@@ -66,7 +69,12 @@ pub fn fuzz_main(
     depot::sync_depot(&mut executor, running.clone(), &depot.dirs.seeds_dir);
 
     if depot.empty() {
-        error!("Failed to find any branches during dry run.\nPlease ensure that the binary has been instrumented and/or input directory is populated. \nPlease ensure that seed directory - {:?} has any file.", depot.dirs.seeds_dir);
+        error!("Failed to find any branches during dry run.");
+        error!("Please ensure that the binary has been instrumented and/or input directory is populated.");
+        error!(
+            "Please ensure that seed directory - {:?} has any file.",
+            depot.dirs.seeds_dir
+        );
         panic!();
     }
 
@@ -110,7 +118,7 @@ pub fn fuzz_main(
     };
 }
 
-fn initialize_directories(in_dir: &str, out_dir: &str, sync_afl: bool) -> PathBuf {
+fn initialize_directories(in_dir: &str, out_dir: &str, sync_afl: bool) -> (PathBuf, PathBuf) {
     let angora_out_dir = if sync_afl {
         gen_path_afl(out_dir)
     } else {
@@ -122,7 +130,17 @@ fn initialize_directories(in_dir: &str, out_dir: &str, sync_afl: bool) -> PathBu
         fs::create_dir(&angora_out_dir).expect("Output directory has existed!");
     }
 
-    angora_out_dir
+    let out_dir = &angora_out_dir;
+    let seeds_dir = if restart {
+        let orig_out_dir = out_dir.with_extension(Local::now().to_rfc3339());
+        fs::rename(&out_dir, orig_out_dir.clone()).unwrap();
+        fs::create_dir(&out_dir).unwrap();
+        PathBuf::from(orig_out_dir).join(defs::INPUTS_DIR)
+    } else {
+        PathBuf::from(in_dir)
+    };
+
+    (seeds_dir, angora_out_dir)
 }
 
 fn gen_path_afl(out_dir: &str) -> PathBuf {
@@ -206,14 +224,15 @@ fn main_thread_sync_and_log(
     stats: &Arc<RwLock<stats::ChartStats>>,
     child_count: Arc<AtomicUsize>,
 ) {
+    let mut last_explore_num = stats.read().unwrap().get_explore_num();
     let sync_dir = Path::new(out_dir);
     let mut synced_ids = HashMap::new();
     if sync_afl {
         depot::sync_afl(executor, running.clone(), sync_dir, &mut synced_ids);
     }
     let mut sync_counter = 1;
+    show_stats(&mut log_file, depot, global_branches, stats);
     while running.load(Ordering::SeqCst) {
-        show_stats(&mut log_file, depot, global_branches, stats);
         thread::sleep(time::Duration::from_secs(5));
         sync_counter -= 1;
         if sync_afl && sync_counter <= 0 {
@@ -221,10 +240,20 @@ fn main_thread_sync_and_log(
             sync_counter = 12;
         }
 
+        show_stats(&mut log_file, depot, global_branches, stats);
         if Arc::strong_count(&child_count) == 1 {
-            // TODO: channel
-            break;
+            let s = stats.read().unwrap();
+            let cur_explore_num = s.get_explore_num();
+            if cur_explore_num == 0 {
+                warn!("There is none constraint in the seeds, please ensure the inputs are vaild in the seed directory, or the program is ran correctly, or the read functions have been marked as source.");
+                break;
+            } else {
+                if cur_explore_num == last_explore_num {
+                    info!("Solve all constraints!!");
+                    break;
+                }
+                last_explore_num = cur_explore_num;
+            }
         }
     }
-    show_stats(&mut log_file, depot, global_branches, stats);
 }

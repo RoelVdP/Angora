@@ -1,26 +1,17 @@
 // corresponding to fuzzer/src/cond_stmt/shm_conds.rs
 
 use angora_common::{cond_stmt_base::CondStmtBase, defs, shm};
-
-use std::{env, ops::DerefMut, sync::Mutex};
-
+use std::{env, process, ops::DerefMut, sync::Mutex};
+use super::context;
 use lazy_static::lazy_static;
 
-extern "C" {
-    fn __angora_get_context() -> u32;
-    fn __angora_set_cmpid(cid: u32);
-    fn __angora_reset_globals();
-}
-
-#[inline(always)]
-fn get_context() -> u32 {
-    unsafe { __angora_get_context() }
-}
+#[no_mangle]
+static mut __angora_cond_cmpid: u32 = 0;
 
 #[inline(always)]
 fn set_cmpid(cid: u32) {
     unsafe {
-        __angora_set_cmpid(cid);
+        __angora_cond_cmpid = cid;
     }
 }
 
@@ -41,6 +32,9 @@ impl ShmConds {
             Ok(val) => {
                 let shm_id = val.parse::<i32>().expect("Could not parse i32 value.");
                 let cond = shm::SHM::<CondStmtBase>::from_id(shm_id);
+                if cond.is_fail() {
+                    process::exit(1);
+                }
                 Some(Self { cond, rt_order: 0 })
             }
             Err(_) => None,
@@ -52,8 +46,8 @@ impl ShmConds {
         self.cond.lb1 = condition;
     }
 
-    pub fn check_match(&mut self, cmpid: u32) -> bool {
-        if self.cond.cmpid == cmpid && self.cond.context == get_context() {
+    pub fn check_match(&mut self, cmpid: u32, context: u32) -> bool {
+        if self.cond.cmpid == cmpid && self.cond.context == context {
             self.rt_order += 1;
             if self.cond.order & 0xFFFF == self.rt_order {
                 return true;
@@ -89,6 +83,7 @@ lazy_static! {
     pub static ref SHM_CONDS: Mutex<Option<ShmConds>> = Mutex::new(ShmConds::get_from_env_id());
 }
 
+#[inline(always)]
 pub fn reset_shm_conds() {
     let mut conds = SHM_CONDS.lock().expect("SHM mutex poisoned.");
     match conds.deref_mut() {
@@ -99,6 +94,6 @@ pub fn reset_shm_conds() {
     }
 
     unsafe {
-        __angora_reset_globals();
+        context::reset_context();
     }
 }

@@ -14,6 +14,9 @@ impl<'a> FnFuzz<'a> {
         let last = self.handler.cond.offsets.last().unwrap();
         let off = last.begin as usize;
         let mut end = last.end;
+        if self.handler.buf.len() <= last.end as usize {
+            self.handler.buf.resize(last.end as usize + 1_usize, 0);
+        }
         let v = self.handler.buf[off];
         for _ in 0..n {
             self.handler.buf.insert(off, v);
@@ -43,32 +46,34 @@ impl<'a> FnFuzz<'a> {
     }
 
     pub fn run(&mut self) {
-        let len = self.handler.cond.base.size as usize;
-        let output = self.handler.cond.variables.split_off(len);
-        let mut input = self.handler.get_f_input();
-        let input_len = input.val_len();
-        if input_len != output.len() {
-            warn!("not all bytes are tainted");
-        } else {
-            if input_len < len {
-                self.insert_bytes(len - input_len);
-            }
-            if input_len > len {
-                self.remove_bytes(input_len - len);
-            }
-            input = self.handler.get_f_input();
-            let input_vals = input.get_value();
-
-            let min_len = std::cmp::min(input_len, len);
-            for i in 0..min_len {
-                let diff = output[i] as i16 - input_vals[i] as i16;
-                if diff != 0 {
-                    debug!("has diff");
-                }
-                self.handler.cond.variables[i] =
-                    (self.handler.cond.variables[i] as i16 - diff) as u8;
-            }
+        let input = self.handler.get_f_input();
+        let len = self.handler.cond.base.size as usize; // magic bytes's length
+        if len > self.handler.cond.variables.len() {
+            error!(
+                "maigic length is less than input length. cond: {:?}",
+                self.handler.cond
+            );
+            return;
         }
+        let output = self.handler.cond.variables.split_off(len); // mapping input
+        let input_len = input.val_len();
+        if input_len < len {
+            self.insert_bytes(len - input_len);
+        } else if input_len > len {
+            self.remove_bytes(input_len - len);
+        }
+
+        let mut input = self.handler.get_f_input();
+        let input_vals = input.get_value();
+        // input_vals.len() becomes len now.
+        assert_eq!(input_vals.len(), len);
+        let min_len = std::cmp::min(len, output.len());
+        assert!(min_len <= self.handler.cond.variables.len());
+        for i in 0..min_len {
+            let diff = output[i] as i16 - input_vals[i] as i16;
+            self.handler.cond.variables[i] = (self.handler.cond.variables[i] as i16 - diff) as u8;
+        }
+
         input.assign(&self.handler.cond.variables);
         self.handler.execute_input(&input);
 

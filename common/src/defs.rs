@@ -1,5 +1,8 @@
 use std;
 // -- envs
+pub static DISABLE_CPU_BINDING_VAR: &str = "ANGORA_DISABLE_CPU_BINDING";
+pub static ANGORA_BIN_DIR: &str = "ANGORA_BIN_DIR";
+
 // executor.rs
 pub static TRACK_OUTPUT_VAR: &str = "ANGORA_TRACK_OUTPUT";
 pub static COND_STMT_ENV_VAR: &str = "ANGORA_COND_STMT_SHM_ID";
@@ -12,6 +15,11 @@ pub static ASAN_OPTIONS_CONTENT: &str =
 pub const MSAN_ERROR_CODE: i32 = 86;
 pub static MSAN_OPTIONS_CONTENT: &str =
     "exit_code=86:symbolize=0:abort_on_error=1:allocator_may_return_null=1:msan_track_origins=0";
+
+// depot.rs
+pub static CRASHES_DIR: &str = "crashes";
+pub static HANGS_DIR: &str = "hangs";
+pub static INPUTS_DIR: &str = "queue";
 
 // forksrv.rs
 pub static ENABLE_FORKSRV: &str = "ANGORA_ENABLE_FORKSRV";
@@ -28,12 +36,6 @@ pub const UNREACHABLE: u64 = std::u64::MAX;
 
 // ** Cond Type
 // < 0xFF: simple if
-pub const COND_BASIC_MASK: u32 = 0xFF;
-pub const COND_SIGN_MASK: u32 = 0x100;
-pub const COND_BOOL_MASK: u32 = 0x200;
-pub const COND_CALL_MASK: u32 = 0x400;
-pub const COND_CALL_REV_MASK: u32 = 0xFBFF;
-
 // http://llvm.org/doxygen/InstrTypes_8h_source.html
 // Opcode              U L G E    Intuitive operation
 pub const COND_FCMP_FALSE: u32 = 0;
@@ -81,6 +83,12 @@ pub const COND_ICMP_SLT_OP: u32 = 40;
 pub const COND_ICMP_SLE_OP: u32 = 41;
 pub const COND_SW_OP: u32 = 0x00FF;
 
+pub const COND_BASIC_MASK: u32 = 0xFF;
+pub const COND_SIGN_MASK: u32 = 0x100;
+pub const COND_BOOL_MASK: u32 = 0x200;
+// pub const COND_CALL_MASK: u32 = 0x400;
+// pub const COND_CALL_REV_MASK: u32 = 0xFBFF;
+
 pub const COND_MAX_EXPLORE_OP: u32 = 0x4000 - 1;
 pub const COND_MAX_EXPLOIT_OP: u32 = 0x5000 - 1;
 
@@ -88,8 +96,8 @@ pub const COND_AFL_OP: u32 = 0x8001;
 // sensititve offsets
 pub const COND_FN_OP: u32 = 0x8002;
 pub const COND_LEN_OP: u32 = 0x8003;
-pub const COND_ENTER_FN: u32 = 0x8010;
-pub const COND_LEAVE_FN: u32 = 0x8011;
+// pub const COND_ENTER_FN: u32 = 0x8010;
+// pub const COND_LEAVE_FN: u32 = 0x8011;
 
 // condition field
 pub const COND_FALSE_ST: u32 = 0;

@@ -11,6 +11,7 @@ struct TagNode {
     left: usize,
     right: usize,
     parent: usize,
+    and_op: bool,
     seg: TagSeg,
 }
 
@@ -20,6 +21,7 @@ impl TagNode {
             left: 0,
             right: 0,
             parent,
+            and_op: false,
             seg: TagSeg {
                 sign: false,
                 begin,
@@ -136,7 +138,7 @@ impl TagSet {
         cur_lb
     }
 
-    pub fn mark_sign(&mut self, lb: usize) {
+    pub fn set_sign(&mut self, lb: usize) {
         self.nodes[lb].seg.sign = true;
     }
 
@@ -148,7 +150,11 @@ impl TagSet {
         }
     }
 
-    pub fn combine_and(&mut self, lb: usize) -> usize {
+    pub fn combine_and(&mut self, lb: usize) {
+        self.nodes[lb].and_op = true;
+    }
+
+    pub fn split_and_op(&mut self, lb: usize) -> usize {
         // if the lb combine some other constants with and
         // e.g. x && 0xFF,
         // We break up its shape (if it has)
@@ -205,8 +211,28 @@ impl TagSet {
         }
     }
 
+    // infer shape in mathmatical operation, e.g add, sub
+    pub fn infer_shape2(&mut self, lb: usize, len: usize) {
+        if lb == ROOT || self.nodes[lb].seg.begin + 1 < self.nodes[lb].seg.end {
+            return;
+        }
+        let mut cur_lb = lb;
+        for _ in 0..(len - 1) {
+            cur_lb = self.nodes[cur_lb].parent;
+
+            if cur_lb == ROOT {
+                return;
+            }
+        }
+        if self.nodes[cur_lb].parent == ROOT {
+            if self.nodes[cur_lb].seg.begin + len as u32 == self.nodes[lb].seg.end {
+                self.nodes[lb].seg.begin = self.nodes[cur_lb].seg.begin;
+            }
+        }
+    }
+
     // load inst will only call combine_n if size >= 2
-    pub fn combine_n(&mut self, lbs: Vec<usize>) -> usize {
+    pub fn combine_n(&mut self, lbs: Vec<usize>, infer: bool) -> usize {
         let mut lb_iter = lbs.iter();
         let mut cur_lb = lb_iter.next();
 
@@ -226,8 +252,10 @@ impl TagSet {
             return cur_lb;
         }
 
-        if let Some(lb) = self.infer_shape(cur_lb, last_lb, lbs.len()) {
-            return lb;
+        if infer {
+            if let Some(lb) = self.infer_shape(cur_lb, last_lb, lbs.len()) {
+                return lb;
+            }
         }
 
         while next_lb.is_some() {
@@ -299,12 +327,14 @@ impl TagSet {
         cur_lb
     }
 
-    pub fn find(&self, mut lb: usize) -> Vec<TagSeg> {
+    pub fn find(&mut self, mut lb: usize) -> Vec<TagSeg> {
         // assert!(lb < self.nodes.len());
         let mut tag_list = vec![];
-
         let mut last_begin = MAX_LB as u32;
         while lb > 0 {
+            if self.nodes[lb].and_op {
+                lb = self.split_and_op(lb);
+            }
             let t = self.nodes[lb].seg;
             if t.begin < last_begin {
                 tag_list.push(t);
@@ -416,7 +446,7 @@ mod tests {
             lbs.push(lb);
         }
 
-        let l2 = tag_set.combine_n(lbs[0..3].to_vec());
+        let l2 = tag_set.combine_n(lbs[0..3].to_vec(), true);
         let list = tag_set.find(l2);
         assert_eq!(list.len(), 3);
         assert_eq!(
@@ -444,7 +474,7 @@ mod tests {
             }
         );
 
-        let l1 = tag_set.combine_n(lbs[0..4].to_vec());
+        let l1 = tag_set.combine_n(lbs[0..4].to_vec(), true);
         let list = tag_set.find(l1);
         assert_eq!(list.len(), 1);
         assert_eq!(
@@ -456,7 +486,7 @@ mod tests {
             }
         );
 
-        let l3 = tag_set.combine_n(lbs[2..10].to_vec());
+        let l3 = tag_set.combine_n(lbs[2..10].to_vec(), true);
         let list = tag_set.find(l3);
         assert_eq!(list.len(), 1);
         assert_eq!(
@@ -468,7 +498,7 @@ mod tests {
             }
         );
 
-        let l4 = tag_set.combine_n(lbs[6..10].to_vec());
+        let l4 = tag_set.combine_n(lbs[6..10].to_vec(), true);
         let list = tag_set.find(l4);
         assert_eq!(list.len(), 1);
         assert_eq!(
@@ -480,7 +510,7 @@ mod tests {
             }
         );
 
-        let l5 = tag_set.combine(l3, l4);
+        let _l5 = tag_set.combine(l3, l4);
         let list = tag_set.find(l3);
         assert_eq!(list.len(), 1);
         assert_eq!(
@@ -514,7 +544,7 @@ mod tests {
         );
 
         // They should has 2 variable!!
-        let l7 = tag_set.combine_n(lbs[2..6].to_vec());
+        let l7 = tag_set.combine_n(lbs[2..6].to_vec(), true);
         let list = tag_set.find(l7);
         assert_eq!(
             list[0],
@@ -566,7 +596,7 @@ mod tests {
             lbs.push(lb);
         }
 
-        let l1 = tag_set.combine_n(lbs[0..4].to_vec());
+        let l1 = tag_set.combine_n(lbs[0..4].to_vec(), true);
         let list = tag_set.find(l1);
         assert_eq!(list.len(), 1);
         assert_eq!(
@@ -627,7 +657,7 @@ mod tests {
             l1 = tag_set.combine(l1, lbs[i]);
         }
 
-        let l2 = tag_set.combine_n(lbs[0..4].to_vec());
+        let l2 = tag_set.combine_n(lbs[0..4].to_vec(), true);
         let list = tag_set.find(l2);
         assert_eq!(list.len(), 1);
         assert_eq!(
@@ -639,7 +669,7 @@ mod tests {
             }
         );
 
-        let l3 = tag_set.combine_n(lbs[0..4].to_vec());
+        let l3 = tag_set.combine_n(lbs[0..4].to_vec(), true);
         let list = tag_set.find(l3);
         assert_eq!(list.len(), 1);
         assert_eq!(
@@ -652,6 +682,67 @@ mod tests {
         );
     }
 
+      #[test]
+    fn tag_set_tests_infer_shape() {
+        let mut tag_set = TagSet::new();
+        let mut lbs = vec![];
+        for i in 2..6 {
+            let lb = tag_set.insert(i);
+            lbs.push(lb);
+        }
+
+        let l1 = tag_set.combine_n(lbs, true);
+        let list = tag_set.find(l1);
+
+        assert_eq!(list.len(), 1);
+        assert_eq!(
+            list[0],
+            TagSeg {
+                sign: false,
+                begin: 2,
+                end: 6
+            }
+        );
+    }
+
+    #[test]
+    fn tag_set_tests_infer_shape2() {
+        // https://github.com/AngoraFuzzer/Angora/pull/50
+        let mut tag_set = TagSet::new();
+        let mut lbs = vec![];
+        for i in 2..6 {
+            let lb = tag_set.insert(i);
+            lbs.push(lb);
+        }
+
+        let l1 = tag_set.combine_n(lbs, false);
+
+        let list = tag_set.find(l1);
+
+        assert_eq!(list.len(), 4);
+        assert_eq!(
+            list[3],
+            TagSeg {
+                sign: false,
+                begin: 5,
+                end: 6
+            }
+        );
+
+        tag_set.infer_shape2(l1, 4);
+        let list = tag_set.find(l1);
+
+        assert_eq!(list.len(), 1);
+        assert_eq!(
+            list[0],
+            TagSeg {
+                sign: false,
+                begin: 2,
+                end: 6
+            }
+        );
+    }
+
     #[test]
     fn tag_set_tests_group_sign() {
         let mut tag_set = TagSet::new();
@@ -660,7 +751,7 @@ mod tests {
             let lb = tag_set.insert(i);
             lbs.push(lb);
         }
-        tag_set.mark_sign(lbs[1]);
+        tag_set.set_sign(lbs[1]);
         let list = tag_set.find(lbs[1]);
         assert_eq!(
             list[0],
@@ -725,7 +816,7 @@ mod tests {
     }
 
     #[test]
-    fn tag_set_tests_combine_and() {
+    fn tag_set_tests_split_and_op() {
         let mut tag_set = TagSet::new();
         let mut lbs = vec![];
         for i in 0..8 {
@@ -733,10 +824,10 @@ mod tests {
             lbs.push(lb);
         }
 
-        let lb = tag_set.combine_n(lbs[0..8].to_vec());
+        let lb = tag_set.combine_n(lbs[0..8].to_vec(), true);
         let list = tag_set.find(lb);
         assert_eq!(list.len(), 1);
-        let lb = tag_set.combine_and(lb);
+        let lb = tag_set.split_and_op(lb);
         let list = tag_set.find(lb);
         assert_eq!(list.len(), 8);
     }

@@ -25,7 +25,6 @@ int main(int argc, char **argv) {
   }
 
   int len = 20;
-  // dfsan_read_label(&(len), sizeof *buf);
   ret = fread(buf, sizeof *buf, len, fp);
   fclose(fp);
   if (ret < len) {
@@ -46,7 +45,7 @@ int main(int argc, char **argv) {
       z != -100000003 && y >= 987654321 && y <= 987654325 && a == 123456789) {
 
     printf("hey, you hit it \n");
-    // abort();
+    abort();
   }
   return 7;
 }
